@@ -29,7 +29,7 @@ model_volume = modal.Volume.from_name("flux-lora-models", create_if_missing=True
 MOUNT_DIR = "/root/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
 
 # define modal app
-image = modal.Image.from_dockerfile("D:/ai-toolkit/docker/Dockerfile").add_local_dir("D:/ai-toolkit/config", "/root/ai-toolkit/config").add_local_dir("D:/ai-toolkit/input/images", '/root/ai-toolkit/input/images')
+image = modal.Image.from_dockerfile("docker/Dockerfile").add_local_dir("config", "/root/ai-toolkit/config").add_local_dir("input/images", '/root/ai-toolkit/input/images')
 
 # mount for the entire ai-toolkit directory
 # example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
