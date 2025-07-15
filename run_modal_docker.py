@@ -2,7 +2,7 @@
 
 ostris/ai-toolkit on https://modal.com
 Run training with the following command:
-modal run run_modal.py --config-file-list-str=/root/ai-toolkit/config/whatever_you_want.yml
+modal run run_modal.py --config-file-list-str=/app/ai-toolkit/config/whatever_you_want.yml
 
 '''
 
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 # Load the .env file if it exists
 load_dotenv()
 
-sys.path.insert(0, "/root/ai-toolkit")
+sys.path.insert(0, "/app/ai-toolkit")
 # must come before ANY torch or fastai imports
 # import toolkit.cuda_malloc
 
@@ -26,10 +26,10 @@ os.environ['DISABLE_TELEMETRY'] = 'YES'
 model_volume = modal.Volume.from_name("flux-lora-models", create_if_missing=True)
 
 # modal_output, due to "cannot mount volume on non-empty path" requirement
-MOUNT_DIR = "/root/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
+MOUNT_DIR = "/app/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
 
 # define modal app
-image = modal.Image.from_dockerfile("docker/Dockerfile").add_local_dir("config", "/root/ai-toolkit/config").add_local_dir("input/images", '/root/ai-toolkit/input/images')
+image = modal.Image.from_dockerfile("docker/Dockerfile").add_local_dir("config", "/app/ai-toolkit/config").add_local_dir("input/images", '/app/ai-toolkit/input/images')
 
 # mount for the entire ai-toolkit directory
 # example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
