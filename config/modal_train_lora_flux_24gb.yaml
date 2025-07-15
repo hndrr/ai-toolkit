@@ -2,11 +2,11 @@
 job: extension
 config:
   # this name will be the folder and filename name
-  name: "my_first_flux_lora_v1"
+  name: "second_flux_lora_v1"
   process:
     - type: 'sd_trainer'
       # root folder to save training sessions/samples/weights
-      training_folder: "/root/ai-toolkit/modal_output" # must match MOUNT_DIR from run_modal.py
+      training_folder: "/app/ai-toolkit/modal_output" # must match MOUNT_DIR from run_modal.py
       # uncomment to see performance stats in the terminal every N steps
 #      performance_log_every: 1000
       device: cuda:0
@@ -28,7 +28,7 @@ config:
         # on windows, escape back slashes with another backslash so
         # "C:\\path\\to\\images\\folder"
         # your dataset must be placed in /ai-toolkit and /root is for modal to find the dir:
-        - folder_path: "/root/ai-toolkit/input/images"
+        - folder_path: "/app/ai-toolkit/input/images"
           caption_ext: "txt"
           caption_dropout_rate: 0.05  # will drop out the caption 5% of time
           shuffle_tokens: false  # shuffle caption order, split by commas
@@ -36,7 +36,7 @@ config:
           resolution: [ 512, 768, 1024 ]  # flux enjoys multiple resolutions
       train:
         batch_size: 1
-        steps: 2000  # total number of steps to train 500 - 4000 is a good range
+        steps: 1500  # total number of steps to train 500 - 4000 is a good range
         gradient_accumulation_steps: 1
         train_unet: true
         train_text_encoder: false  # probably won't work with flux
@@ -62,7 +62,7 @@ config:
         # huggingface model name or path
         # if you get an error, or get stuck while downloading,
         # check https://github.com/ostris/ai-toolkit/issues/84, download the model locally and
-        # place it like "/root/ai-toolkit/FLUX.1-dev"
+        # place it like "/app/ai-toolkit/FLUX.1-dev"
         name_or_path: "black-forest-labs/FLUX.1-dev"
         is_flux: true
         quantize: true  # run 8bit mixed precision
