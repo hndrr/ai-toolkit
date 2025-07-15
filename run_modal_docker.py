@@ -29,7 +29,7 @@ model_volume = modal.Volume.from_name("flux-lora-models", create_if_missing=True
 MOUNT_DIR = "/root/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
 
 # define modal app
-image = modal.Image.from_dockerfile("D:/ai-toolkit/docker/Dockerfile").add_local_dir("D:/ai-toolkit", "/root/ai-toolkit")
+image = modal.Image.from_dockerfile("D:/ai-toolkit/docker/Dockerfile").add_local_dir("D:/ai-toolkit/config", "/root/ai-toolkit/config").add_local_dir("D:/ai-toolkit/input/images", '/root/ai-toolkit/input/images')
 
 # mount for the entire ai-toolkit directory
 # example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
@@ -67,7 +67,8 @@ def print_end_message(jobs_completed, jobs_failed):
     # more about modal GPU's: https://modal.com/docs/guide/gpu
     gpu="A100", # gpu="H100"
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
-    timeout=7200  # 2 hours, increase or decrease if needed
+    timeout=7200,  # 2 hours, increase or decrease if needed
+    secrets=[modal.Secret.from_name("huggingface-secret")]
 )
 def main(config_file_list_str: str, recover: bool = False, name: str = None):
     # convert the config file list from a string to a list
