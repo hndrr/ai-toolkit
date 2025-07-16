@@ -70,9 +70,10 @@ def print_end_message(jobs_completed, jobs_failed):
     timeout=7200,  # 2 hours, increase or decrease if needed
     secrets=[modal.Secret.from_name("huggingface-secret")]
 )
-def main(config_file_list_str: str, recover: bool = False, name: str = None):    
+
+def main(config_file_list_str: str, recover: bool = False, name: str = None):
     # convert the config file list from a string to a list
-    config_file_list = str(config_file_list_str).split(",")
+    config_file_list = config_file_list_str.split(",")
 
     jobs_completed = 0
     jobs_failed = 0
@@ -107,29 +108,16 @@ def main(config_file_list_str: str, recover: bool = False, name: str = None):
 # WebUIアクセス用の新しい関数を追加（GPU対応でトレーニング可能）
 @app.function(
     image=image,
-    gpu="A100",  # ← GPUを有効化！WebUIからトレーニングできるように
+    gpu="A100",
     cpu=4,
     memory=32768,  # 32GB
     timeout=7200,  # 2時間
-    volumes={MOUNT_DIR: model_volume},  # ← ボリュームもマウント
-    secrets=[modal.Secret.from_name("huggingface-secret")]
+    volumes={MOUNT_DIR: model_volume}
 )
 def webui():
     import subprocess
     import time
     import os
-    
-    # Hugging Faceにログイン
-    try:
-        from huggingface_hub import login
-        hf_token = os.environ.get("HF_TOKEN")
-        if hf_token:
-            login(token=hf_token)
-            print("✅ Successfully logged in to Hugging Face")
-        else:
-            print("⚠️ No HF_TOKEN found")
-    except Exception as e:
-        print(f"⚠️ Failed to login to Hugging Face: {e}")
     
     # AI-toolkit UIディレクトリに移動
     os.chdir("/app/ai-toolkit/ui")
@@ -144,20 +132,12 @@ def webui():
         print(f"💾 Training outputs will be saved to: {MOUNT_DIR}")
         
         # npm run startでWebUIを起動
-        env_vars = os.environ.copy()
-        if hf_token:
-            env_vars.update({
-                "HF_TOKEN": hf_token,
-                "HUGGINGFACE_HUB_TOKEN": hf_token,
-                "HF_API_TOKEN": hf_token
-            })
-        
         process = subprocess.Popen(
             ["npm", "run", "start"],
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE,
             cwd="/app/ai-toolkit/ui",
-            env=env_vars  # 環境変数を明示的に渡す
+            env={**os.environ, "TRAINING_FOLDER": MOUNT_DIR}
         )
         
         # サーバーが起動するまで待機
@@ -169,33 +149,13 @@ def webui():
         # 2時間維持（トレーニング時間を考慮）
         try:
             while process.poll() is None:
-                # プロセスのログを定期的に出力
-                try:
-                    stdout_line = process.stdout.readline()
-                    if stdout_line:
-                        print(f"[WebUI] {stdout_line.decode().strip()}")
-                    
-                    stderr_line = process.stderr.readline()
-                    if stderr_line:
-                        print(f"[WebUI ERROR] {stderr_line.decode().strip()}")
-                except:
-                    pass
-                
-                time.sleep(10)
+                time.sleep(60)
                 # 定期的にボリュームをコミット
                 model_volume.commit()
         except KeyboardInterrupt:
             print("🛑 Shutting down WebUI...")
             process.terminate()
         finally:
-            # プロセス終了時の最終ログ
-            if process.poll() is not None:
-                stdout, stderr = process.communicate()
-                if stdout:
-                    print(f"[WebUI Final STDOUT] {stdout.decode()}")
-                if stderr:
-                    print(f"[WebUI Final STDERR] {stderr.decode()}")
-            
             # 最終コミット
             model_volume.commit()
             print("💾 Final volume commit completed")
@@ -225,20 +185,9 @@ if __name__ == "__main__":
         default=None,
         help='Name to replace [name] tag in config file, useful for shared config file'
     )
-    
-    # WebUIオプションを追加
-    parser.add_argument(
-        '--webui',
-        action='store_true',
-        help='Launch WebUI instead of training'
-    )
-    
     args = parser.parse_args()
 
-    if args.webui:
-        # WebUI起動
-        webui.remote()
-    else:
-        # 従来通りのトレーニング実行
-        config_file_list_str = ",".join(args.config_file_list)
-        main.remote(config_file_list_str=config_file_list_str, recover=args.recover, name=args.name)
+    # convert list of config files to a comma-separated string for Modal compatibility
+    config_file_list_str = ",".join(args.config_file_list)
+
+    main.call(config_file_list_str=config_file_list_str, recover=args.recover, name=args.name)
