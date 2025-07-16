@@ -2,7 +2,7 @@
 
 ostris/ai-toolkit on https://modal.com
 Run training with the following command:
-modal run run_modal.py --config-file-list-str=/root/ai-toolkit/config/whatever_you_want.yml
+modal run run_modal.py --config-file-list-str=/app/ai-toolkit/config/whatever_you_want.yml
 
 '''
 
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 # Load the .env file if it exists
 load_dotenv()
 
-sys.path.insert(0, "/root/ai-toolkit")
+sys.path.insert(0, "/app/ai-toolkit")
 # must come before ANY torch or fastai imports
 # import toolkit.cuda_malloc
 
@@ -26,51 +26,10 @@ os.environ['DISABLE_TELEMETRY'] = 'YES'
 model_volume = modal.Volume.from_name("flux-lora-models", create_if_missing=True)
 
 # modal_output, due to "cannot mount volume on non-empty path" requirement
-MOUNT_DIR = "/root/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
+MOUNT_DIR = "/app/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
 
 # define modal app
-image = (
-    modal.Image.debian_slim(python_version="3.11")
-    # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
-    .apt_install("libgl1", "libglib2.0-0")
-    .pip_install(
-        "python-dotenv",
-        "torch", 
-        "diffusers[torch]", 
-        "transformers", 
-        "ftfy", 
-        "torchvision", 
-        "oyaml", 
-        "opencv-python", 
-        "albumentations",
-        "safetensors",
-        "lycoris-lora==1.8.3",
-        "flatten_json",
-        "pyyaml",
-        "tensorboard", 
-        "kornia", 
-        "invisible-watermark", 
-        "einops", 
-        "accelerate", 
-        "toml", 
-        "pydantic",
-        "omegaconf",
-        "k-diffusion",
-        "open_clip_torch",
-        "timm",
-        "prodigyopt",
-        "controlnet_aux==0.0.7",
-        "bitsandbytes",
-        "hf_transfer",
-        "lpips", 
-        "pytorch_fid", 
-        "optimum-quanto", 
-        "sentencepiece", 
-        "huggingface_hub", 
-        "peft"
-    )
-    .add_local_dir("D:/ai-toolkit", "/root/ai-toolkit")
-)
+image = modal.Image.from_dockerfile("docker/Dockerfile").add_local_dir("config", "/app/ai-toolkit/config").add_local_dir("input/images", '/app/ai-toolkit/input/images')
 
 # mount for the entire ai-toolkit directory
 # example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
@@ -108,8 +67,10 @@ def print_end_message(jobs_completed, jobs_failed):
     # more about modal GPU's: https://modal.com/docs/guide/gpu
     gpu="A100", # gpu="H100"
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
-    timeout=7200  # 2 hours, increase or decrease if needed
+    timeout=7200,  # 2 hours, increase or decrease if needed
+    secrets=[modal.Secret.from_name("huggingface-secret")]
 )
+
 def main(config_file_list_str: str, recover: bool = False, name: str = None):
     # convert the config file list from a string to a list
     config_file_list = config_file_list_str.split(",")
@@ -143,6 +104,61 @@ def main(config_file_list_str: str, recover: bool = False, name: str = None):
                 raise e
 
     print_end_message(jobs_completed, jobs_failed)
+
+# WebUIアクセス用の新しい関数を追加（GPU対応でトレーニング可能）
+@app.function(
+    image=image,
+    gpu="A100",
+    cpu=4,
+    memory=32768,  # 32GB
+    timeout=7200,  # 2時間
+    volumes={MOUNT_DIR: model_volume}
+)
+def webui():
+    import subprocess
+    import time
+    import os
+    
+    # AI-toolkit UIディレクトリに移動
+    os.chdir("/app/ai-toolkit/ui")
+    
+    # トレーニング結果保存先を作成
+    os.makedirs(MOUNT_DIR, exist_ok=True)
+    
+    # modal.forwardでポート8675を公開
+    with modal.forward(8675) as tunnel:
+        print(f"🌐 AI Toolkit WebUI is accessible at: {tunnel.url}")
+        print(f"🔧 Starting UI server...")
+        print(f"💾 Training outputs will be saved to: {MOUNT_DIR}")
+        
+        # npm run startでWebUIを起動
+        process = subprocess.Popen(
+            ["npm", "run", "start"],
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            cwd="/app/ai-toolkit/ui",
+            env={**os.environ, "TRAINING_FOLDER": MOUNT_DIR}
+        )
+        
+        # サーバーが起動するまで待機
+        print("⏳ Waiting for server to start...")
+        time.sleep(30)
+        print(f"✅ WebUI should now be accessible at: {tunnel.url}")
+        print(f"🚀 You can now start training jobs from the WebUI!")
+        
+        # 2時間維持（トレーニング時間を考慮）
+        try:
+            while process.poll() is None:
+                time.sleep(60)
+                # 定期的にボリュームをコミット
+                model_volume.commit()
+        except KeyboardInterrupt:
+            print("🛑 Shutting down WebUI...")
+            process.terminate()
+        finally:
+            # 最終コミット
+            model_volume.commit()
+            print("💾 Final volume commit completed")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

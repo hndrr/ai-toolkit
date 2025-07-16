@@ -2,7 +2,7 @@
 job: extension
 config:
   # this name will be the folder and filename name
-  name: "my_first_flux_lora_v1"
+  name: "my_first_flux_kontext_lora_v1"
   process:
     - type: 'sd_trainer'
       # root folder to save training sessions/samples/weights
@@ -31,15 +31,22 @@ config:
         # images will automatically be resized and bucketed into the resolution specified
         # on windows, escape back slashes with another backslash so
         # "C:\\path\\to\\images\\folder"
-        - folder_path: "/path/to/images/folder"
+        - folder_path: "/root/ai-toolkit/input/images"
+          # control path is the input images for kontext for a paired dataset. These are the source images you want to change.  
+          # You can comment this out and only use normal images if you don't have a paired dataset. 
+          # Control images need to match the filenames on the folder path but in
+          # a different folder. These do not need captions.
+          control_path: "/root/ai-toolkit/input/control"
           caption_ext: "txt"
           caption_dropout_rate: 0.05  # will drop out the caption 5% of time
           shuffle_tokens: false  # shuffle caption order, split by commas
           cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: [ 512, 768, 1024 ]  # flux enjoys multiple resolutions
+          # Kontext runs images in at 2x the latent size. It may OOM at 1024 resolution with 24GB vram.
+          resolution: [ 512, 768 ]  # flux enjoys multiple resolutions
+          # resolution: [ 512, 768, 1024 ]
       train:
         batch_size: 1
-        steps: 2000  # total number of steps to train 500 - 4000 is a good range
+        steps: 3000  # total number of steps to train 500 - 4000 is a good range
         gradient_accumulation_steps: 1
         train_unet: true
         train_text_encoder: false  # probably won't work with flux
@@ -47,25 +54,26 @@ config:
         noise_scheduler: "flowmatch" # for training only
         optimizer: "adamw8bit"
         lr: 1e-4
+        timestep_type: "weighted" # sigmoid, linear, or weighted.
         # uncomment this to skip the pre training sample
 #        skip_first_sample: true
         # uncomment to completely disable sampling
 #        disable_sampling: true
-        # uncomment to use new vell curved weighting. Experimental but may produce better results
-#        linear_timesteps: true
 
-        # ema will smooth out learning, but could slow it down. Recommended to leave on.
-        ema_config:
-          use_ema: true
-          ema_decay: 0.99
+        # ema will smooth out learning, but could slow it down.
+
+        # ema_config:
+        #   use_ema: true
+        #   ema_decay: 0.99
 
         # will probably need this if gpu supports it for flux, other dtypes may not work correctly
         dtype: bf16
       model:
-        # huggingface model name or path
-        # name_or_path: "black-forest-labs/FLUX.1-dev"
-        name_or_path: "D:/ai-toolkit/FLUX.1-dev/"
-        is_flux: true
+        # huggingface model name or path. This model is gated.
+        # visit https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev to accept the terms and conditions
+        # and then you can use this model.
+        name_or_path: "black-forest-labs/FLUX.1-Kontext-dev"
+        arch: "flux_kontext"
         quantize: true  # run 8bit mixed precision
 #        low_vram: true  # uncomment this if the GPU is connected to your monitors. It will use less vram to quantize, but is slower.
       sample:
@@ -75,17 +83,18 @@ config:
         height: 1024
         prompts:
           # you can add [trigger] to the prompts here and it will be replaced with the trigger word
+          # the --ctrl_img path is the one loaded to apply the kontext editing to
 #          - "[trigger] holding a sign that says 'I LOVE PROMPTS!'"\
-          - "woman with red hair, playing chess at the park, bomb going off in the background"
-          - "a woman holding a coffee cup, in a beanie, sitting at a cafe"
-          - "a horse is a DJ at a night club, fish eye lens, smoke machine, lazer lights, holding a martini"
-          - "a man showing off his cool new t shirt at the beach, a shark is jumping out of the water in the background"
-          - "a bear building a log cabin in the snow covered mountains"
-          - "woman playing the guitar, on stage, singing a song, laser lights, punk rocker"
-          - "hipster man with a beard, building a chair, in a wood shop"
-          - "photo of a man, white background, medium shot, modeling clothing, studio lighting, white backdrop"
-          - "a man holding a sign that says, 'this is a sign'"
-          - "a bulldog, in a post apocalyptic world, with a shotgun, in a leather jacket, in a desert, with a motorcycle"
+          - "make the person smile  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "give the person an afro  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "turn this image into a cartoon  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "put this person in an action film  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "make this person a rapper in a rap music video  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "make the person smile  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "give the person an afro  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "turn this image into a cartoon  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "put this person in an action film  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "make this person a rapper in a rap music video  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
         neg: ""  # not used on flux
         seed: 42
         walk_seed: true
