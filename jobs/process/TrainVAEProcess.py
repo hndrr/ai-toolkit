@@ -23,7 +23,7 @@ from toolkit.metadata import get_meta_for_safetensors
 from toolkit.optimizer import get_optimizer
 from toolkit.style import get_style_model_and_losses
 from toolkit.train_tools import get_torch_dtype
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, AutoencoderTiny
 from tqdm import tqdm
 import math
 import torchvision.utils
@@ -94,6 +94,9 @@ class TrainVAEProcess(BaseTrainProcess):
         self.dropout = self.get_conf('dropout', 0.0, as_type=float)
         self.train_encoder = self.get_conf('train_encoder', False, as_type=bool)
         self.random_scaling = self.get_conf('random_scaling', False, as_type=bool)
+        self.vae_type = self.get_conf('vae_type', 'AutoencoderKL', as_type=str) # AutoencoderKL or AutoencoderTiny
+        
+        self.VaeClass = AutoencoderKL if self.vae_type == 'AutoencoderKL' else AutoencoderTiny
         
         if not self.train_encoder:
             # remove losses that only target encoder
@@ -407,7 +410,22 @@ class TrainVAEProcess(BaseTrainProcess):
                 input_img = img
                 img = IMAGE_TRANSFORMS(img).unsqueeze(0).to(self.device, dtype=self.torch_dtype)
                 img = img
-                latent = self.vae.encode(img).latent_dist.sample()
+                # latent = self.vae.encode(img).latent_dist.sample()
+
+                target_latent = None
+                if self.target_latent_vae is not None:
+                    target_input_scale = self.target_vae_scale_factor / self.vae_scale_factor 
+                    target_input_size = (int(img.shape[2] * target_input_scale), int(img.shape[3] * target_input_scale))
+                    # resize to target input size
+                    target_input_batch = Resize(target_input_size)(img).to(self.device, dtype=torch.float32)
+                    target_latent = self.target_latent_vae.encode(target_input_batch).latent_dist.sample().detach()
+                    shift = self.target_latent_vae.config['shift_factor'] if self.target_latent_vae.config['shift_factor'] is not None else 0
+                    target_latent = self.target_latent_vae.config['scaling_factor'] * (target_latent - shift)
+                    target_latent = target_latent.to(self.device, dtype=self.torch_dtype)
+                latent = self.vae.encode(img, return_dict=False)[0]
+                
+                shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
+                latent = self.vae.config['scaling_factor'] * (latent - shift)
                 
                 latent_img = latent.clone()
                 bs, ch, h, w = latent_img.shape
@@ -438,6 +456,12 @@ class TrainVAEProcess(BaseTrainProcess):
                 latent_img = (latent_img * 255).astype(np.uint8)
                 # convert to pillow image
                 latent_img = Image.fromarray(latent_img)
+                
+                if target_latent is not None:
+                    latent = target_latent.to(latent.device, dtype=latent.dtype)
+                    
+                shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
+                latent = latent / self.vae.config['scaling_factor'] + shift
                 
                 decoded = self.vae.decode(latent).sample
                 decoded = (decoded / 2 + 0.5).clamp(0, 1)
@@ -492,9 +516,9 @@ class TrainVAEProcess(BaseTrainProcess):
         self.print(f" - Loading VAE: {path_to_load}")
         if self.vae is None:
             if path_to_load is not None:
-                self.vae = AutoencoderKL.from_pretrained(path_to_load)
+                self.vae = self.VaeClass.from_pretrained(path_to_load)
             elif self.vae_config is not None:
-                self.vae = AutoencoderKL(**self.vae_config)
+                self.vae = self.VaeClass(**self.vae_config)
             else:
                 raise ValueError('vae_path or ae_config must be specified')
 
@@ -511,7 +535,7 @@ class TrainVAEProcess(BaseTrainProcess):
         if self.target_latent_vae_path is not None:
             self.print(f"Loading target latent VAE from {self.target_latent_vae_path}")
             self.target_latent_vae = AutoencoderKL.from_pretrained(self.target_latent_vae_path)
-            self.target_latent_vae.to(self.device, dtype=self.torch_dtype)
+            self.target_latent_vae.to(self.device, dtype=torch.float32)
             self.target_latent_vae.eval()
             self.target_vae_scale_factor = 2 ** (len(self.target_latent_vae.config['block_out_channels']) - 1)
         else:
@@ -585,7 +609,7 @@ class TrainVAEProcess(BaseTrainProcess):
 
         if self.lpips_weight > 0 and self.lpips_loss is None:
             # self.lpips_loss = lpips.LPIPS(net='vgg')
-            self.lpips_loss = lpips.LPIPS(net='vgg').to(self.device, dtype=self.torch_dtype)
+            self.lpips_loss = lpips.LPIPS(net='vgg').to(self.device, dtype=torch.bfloat16)
 
         optimizer = get_optimizer(params, self.optimizer_type, self.learning_rate,
                                   optimizer_params=self.optimizer_params)
@@ -664,20 +688,33 @@ class TrainVAEProcess(BaseTrainProcess):
                         target_input_scale = self.target_vae_scale_factor / self.vae_scale_factor 
                         target_input_size = (int(batch.shape[2] * target_input_scale), int(batch.shape[3] * target_input_scale))
                         # resize to target input size
-                        target_input_batch = Resize(target_input_size)(batch)
+                        target_input_batch = Resize(target_input_size)(batch).to(self.device, dtype=torch.float32)
                         target_latent = self.target_latent_vae.encode(target_input_batch).latent_dist.sample().detach()
+                        # shift scale it
+                        shift = self.target_latent_vae.config['shift_factor'] if self.target_latent_vae.config['shift_factor'] is not None else 0
+                        target_latent = self.target_latent_vae.config['scaling_factor'] * (target_latent - shift)
+                        target_latent = target_latent.to(self.device, dtype=self.torch_dtype)
                         
 
                     # forward pass
                 # grad only if eq_vae
                 with torch.set_grad_enabled(self.train_encoder):
-                    dgd = self.vae.encode(batch).latent_dist
-                    mu, logvar = dgd.mean, dgd.logvar
-                    latents = dgd.sample()
+                    if self.vae_type == 'AutoencoderTiny':
+                        # AutoencoderTiny cannot do latent distribution sampling
+                        latents = self.vae.encode(batch, return_dict=False)[0]
+                        mu, logvar = None, None
+                    else:
+                        dgd = self.vae.encode(batch).latent_dist
+                        mu, logvar = dgd.mean, dgd.logvar
+                        latents = dgd.sample()
+                    
+                    # scale shift latent to config
+                    shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
+                    latents = self.vae.config['scaling_factor'] * (latents - shift)
                     
                     if target_latent is not None:
                         # forward_latents = target_latent.detach()
-                        lat_mse_loss = self.get_mse_loss(target_latent, latents)
+                        lat_mse_loss = self.get_mse_loss(target_latent.float(), latents.float())
                         latents = target_latent.detach()
                         forward_latents = target_latent.detach()
                         
@@ -749,6 +786,10 @@ class TrainVAEProcess(BaseTrainProcess):
                 if not self.train_encoder:
                     # detach latents if not training encoder
                     forward_latents = forward_latents.detach()
+                
+                # shift latents to match vae config
+                shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
+                forward_latents = forward_latents / self.vae.config['scaling_factor'] + shift
 
                 pred = self.vae.decode(forward_latents).sample
 
@@ -771,9 +812,9 @@ class TrainVAEProcess(BaseTrainProcess):
                 mae_loss = self.get_mae_loss(pred, batch) * self.mae_weight
                 if self.lpips_weight > 0:
                     lpips_loss = self.lpips_loss(
-                        pred.clamp(-1, 1),
-                        batch.clamp(-1, 1)
-                    ).mean() * self.lpips_weight
+                        pred.clamp(-1, 1).to(self.device, dtype=torch.bfloat16),
+                        batch.clamp(-1, 1).to(self.device, dtype=torch.bfloat16)
+                    ).float().mean() * self.lpips_weight
                 else:
                     lpips_loss = torch.tensor(0.0, device=self.device, dtype=self.torch_dtype)
                 tv_loss = self.get_tv_loss(pred, batch) * self.tv_weight
