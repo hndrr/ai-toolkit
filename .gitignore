@@ -181,3 +181,6 @@ cython_debug/
 ._.DS_Store
 aitk_db.db
 /notes.md
+triton-3.2.0-cp310-cp310-win_amd64.whl
+input/*
+FLUX.1-dev/*
