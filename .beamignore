@@ -11,7 +11,8 @@ __pycache__/
 .mypy_cache/
 .uv/
 env/
-ui/
+ui/node_modules/
+ui/.next/
 testing/
 output/
 modal_output/
