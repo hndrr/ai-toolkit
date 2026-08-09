@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
 
-from beam import Image, Pod, Volume, function
-from beta9.env import is_remote
+from beam import Image, Pod, Volume, env, function
 
 
 APP_DIR = "/mnt/code"
@@ -46,6 +45,7 @@ ON_DEMAND_GPUS = (
 )
 SUPPORTED_GPUS = tuple(dict.fromkeys((*SERVERLESS_GPUS, *ON_DEMAND_GPUS)))
 DEFAULT_KEEP_WARM_SECONDS = 1800
+DEFAULT_TRAIN_TIMEOUT_SECONDS = 7200
 
 
 @dataclass(frozen=True)
@@ -123,8 +123,43 @@ def resolve_keep_warm_seconds(
     return keep_warm_seconds
 
 
+def resolve_train_timeout_seconds(
+    environ: Optional[Mapping[str, str]] = None,
+) -> int:
+    """Read the total timeout for a Beam training invocation.
+
+    A single invocation can run several configs sequentially, so the default
+    must be large enough for the whole batch while still being easy to tune
+    for a particular workload.
+    """
+
+    values = os.environ if environ is None else environ
+    raw_value = values.get("BEAM_TRAIN_TIMEOUT_SECONDS", "").strip()
+    if not raw_value:
+        return DEFAULT_TRAIN_TIMEOUT_SECONDS
+
+    try:
+        timeout_seconds = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(
+            "BEAM_TRAIN_TIMEOUT_SECONDS must be an integer number of seconds "
+            "(greater than zero, or -1 for no timeout), "
+            f"got {raw_value!r}."
+        ) from exc
+
+    if timeout_seconds == 0 or timeout_seconds < -1:
+        raise ValueError(
+            "BEAM_TRAIN_TIMEOUT_SECONDS must be greater than zero, or -1 for "
+            "no timeout. "
+            f"Got {timeout_seconds}."
+        )
+
+    return timeout_seconds
+
+
 beam_gpu_config = resolve_beam_gpu_config()
 beam_keep_warm_seconds = resolve_keep_warm_seconds()
+beam_train_timeout_seconds = resolve_train_timeout_seconds()
 
 output_volume = Volume(name="ai-toolkit-output", mount_path=OUTPUT_DIR)
 cache_volume = Volume(name="ai-toolkit-cache", mount_path=CACHE_DIR)
@@ -159,7 +194,7 @@ def _build_beam_image() -> Image:
     files by Beam and therefore do not invalidate this image's build cache.
     """
 
-    if is_remote():
+    if env.is_remote():
         # The remote worker receives the already-built image metadata. Avoid
         # touching local paths when this module is imported inside the worker.
         return Image.from_dockerfile("docker/Dockerfile.beam", context_dir=".")
@@ -210,6 +245,9 @@ ai_toolkit_gui = Pod(
     memory="32Gi",
     ports=[8675],
     keep_warm_seconds=beam_keep_warm_seconds,
+    # Keep the browser-facing Pod URL reachable so the UI can show its login
+    # page. Next middleware and the front file server enforce AI_TOOLKIT_AUTH
+    # on every API/media route, including uploads and deletes.
     authorized=False,
     entrypoint=_beam_ui_entrypoint(),
     volumes=[output_volume, cache_volume, ui_state_volume],
@@ -250,7 +288,7 @@ def _print_end_message(jobs_completed: int, jobs_failed: int) -> None:
     pool=beam_gpu_config.pool,
     cpu=4,
     memory="32Gi",
-    timeout=7200,
+    timeout=beam_train_timeout_seconds,
     retries=0,
     volumes=[output_volume, cache_volume],
     secrets=["HF_TOKEN"],
@@ -377,4 +415,6 @@ if __name__ == "__main__":
     remote_config_files = [
         _to_remote_path(config_file, repository_root) for config_file in args.config_files
     ]
-    train.remote(remote_config_files, recover=args.recover, name=args.name)
+    result = train.remote(remote_config_files, recover=args.recover, name=args.name)
+    if isinstance(result, dict) and result.get("failed", 0):
+        raise SystemExit(1)

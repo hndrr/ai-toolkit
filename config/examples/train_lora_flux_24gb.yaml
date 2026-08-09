@@ -64,7 +64,9 @@ config:
       model:
         # huggingface model name or path
         # name_or_path: "black-forest-labs/FLUX.1-dev"
-        name_or_path: "D:/ai-toolkit/FLUX.1-dev/"
+        name_or_path: "black-forest-labs/FLUX.1-dev"
+        # To use a locally downloaded model, set an absolute path instead, e.g.
+        # name_or_path: "/path/to/FLUX.1-dev/"
         is_flux: true
         quantize: true  # run 8bit mixed precision
 #        low_vram: true  # uncomment this if the GPU is connected to your monitors. It will use less vram to quantize, but is slower.

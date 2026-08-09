@@ -66,3 +66,18 @@ COPY ui /mnt/code/ui
 RUN cd /mnt/code/ui \
     && npx prisma generate \
     && npm run build
+
+# Do not run the training worker or the WebUI as root. Beam mounts the runtime
+# volumes below these paths, so prepare matching writable directories in the
+# image before switching users; the mounted volumes retain their own contents.
+ARG AI_TOOLKIT_UID=1000
+ARG AI_TOOLKIT_GID=1000
+RUN groupadd --gid "${AI_TOOLKIT_GID}" ai-toolkit \
+    && useradd --uid "${AI_TOOLKIT_UID}" --gid "${AI_TOOLKIT_GID}" \
+        --create-home --shell /bin/bash ai-toolkit \
+    && mkdir -p /volumes/ai-toolkit-output \
+        /volumes/ai-toolkit-cache \
+        /volumes/ai-toolkit-ui-state \
+    && chown -R ai-toolkit:ai-toolkit /mnt/code /home/ai-toolkit /volumes
+ENV HOME=/home/ai-toolkit
+USER ai-toolkit

@@ -6,7 +6,7 @@ config:
   process:
     - type: 'sd_trainer'
       # root folder to save training sessions/samples/weights
-      training_folder: "output"
+      training_folder: "/app/ai-toolkit/modal_output"
       # uncomment to see performance stats in the terminal every N steps
 #      performance_log_every: 1000
       device: cuda:0
@@ -31,12 +31,12 @@ config:
         # images will automatically be resized and bucketed into the resolution specified
         # on windows, escape back slashes with another backslash so
         # "C:\\path\\to\\images\\folder"
-        - folder_path: "/root/ai-toolkit/input/images"
+        - folder_path: "/app/ai-toolkit/input/images"
           # control path is the input images for kontext for a paired dataset. These are the source images you want to change.  
           # You can comment this out and only use normal images if you don't have a paired dataset. 
           # Control images need to match the filenames on the folder path but in
           # a different folder. These do not need captions.
-          control_path: "/root/ai-toolkit/input/control"
+          control_path: "/app/ai-toolkit/input/control"
           caption_ext: "txt"
           caption_dropout_rate: 0.05  # will drop out the caption 5% of time
           shuffle_tokens: false  # shuffle caption order, split by commas
@@ -85,16 +85,11 @@ config:
           # you can add [trigger] to the prompts here and it will be replaced with the trigger word
           # the --ctrl_img path is the one loaded to apply the kontext editing to
 #          - "[trigger] holding a sign that says 'I LOVE PROMPTS!'"\
-          - "make the person smile  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "give the person an afro  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "turn this image into a cartoon  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "put this person in an action film  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "make this person a rapper in a rap music video  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "make the person smile  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "give the person an afro  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "turn this image into a cartoon  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "put this person in an action film  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
-          - "make this person a rapper in a rap music video  --ctrl_img /root/ai-toolkit/input/control/person1.jpg"
+          - "make the person smile  --ctrl_img /app/ai-toolkit/input/control/person1.jpg"
+          - "give the person an afro  --ctrl_img /app/ai-toolkit/input/control/person1.jpg"
+          - "turn this image into a cartoon  --ctrl_img /app/ai-toolkit/input/control/person1.jpg"
+          - "put this person in an action film  --ctrl_img /app/ai-toolkit/input/control/person1.jpg"
+          - "make this person a rapper in a rap music video  --ctrl_img /app/ai-toolkit/input/control/person1.jpg"
         neg: ""  # not used on flux
         seed: 42
         walk_seed: true

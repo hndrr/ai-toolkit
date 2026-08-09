@@ -241,6 +241,9 @@ pip install --upgrade accelerate transformers diffusers huggingface_hub #Optiona
 #### Modal:
 - Run `pip install modal` to install the modal Python package.
 - Run `modal setup` to authenticate (if this doesn’t work, try `python -m modal setup`).
+- For `run_modal_docker.py --webui`, add both `HF_TOKEN` and a strong
+  `AI_TOOLKIT_AUTH` value to the `huggingface-secret` Modal Secret. The WebUI
+  refuses to start when the password is missing.
 
 #### Hugging Face:
 - Get a READ token from [here](https://huggingface.co/settings/tokens) and request access to Flux.1-dev model from [here](https://huggingface.co/black-forest-labs/FLUX.1-dev).
@@ -316,6 +319,16 @@ The default inactivity timeout is 1800 seconds. Override it explicitly when depl
 ```bash
 BEAM_KEEP_WARM_SECONDS=3600 BEAM_GPU=RTX4090 \
   uv run beam deploy run_beam.py:ai_toolkit_gui
+```
+
+The training Function timeout defaults to 7200 seconds for one or more
+sequential configs. Set `BEAM_TRAIN_TIMEOUT_SECONDS` when a batch needs more
+time (`-1` disables the Function timeout); this does not change the Pod
+inactivity timeout:
+
+```bash
+BEAM_TRAIN_TIMEOUT_SECONDS=14400 BEAM_GPU=RTX4090 \
+  uv run python run_beam.py config/job_one.yaml config/job_two.yaml
 ```
 
 Use `BEAM_KEEP_WARM_SECONDS=-1` only when a long training run must survive a closed browser; it prevents scale-to-zero and requires an explicit container stop. Beam terminates idle Pods after 10 minutes by default and supports custom timeouts, including `-1` for no inactivity timeout ([Pod lifecycle](https://docs.beam.cloud/v2/pod/web-service)).

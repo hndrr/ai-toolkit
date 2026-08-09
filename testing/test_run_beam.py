@@ -49,12 +49,14 @@ def load_run_beam(
     gpu: str | None,
     pool: str | None = None,
     keep_warm_seconds: str | None = None,
+    train_timeout_seconds: str | None = None,
 ):
     captured: dict[str, object] = {}
     fake_beam = types.ModuleType("beam")
     fake_beam.Image = FakeImage
     fake_beam.Volume = FakeVolume
     fake_beam.Pod = lambda **kwargs: FakePod(**kwargs)
+    fake_beam.env = types.SimpleNamespace(is_remote=lambda: False)
 
     def fake_function(**kwargs):
         captured.update(kwargs)
@@ -74,6 +76,8 @@ def load_run_beam(
         environ["BEAM_POOL"] = pool
     if keep_warm_seconds is not None:
         environ["BEAM_KEEP_WARM_SECONDS"] = keep_warm_seconds
+    if train_timeout_seconds is not None:
+        environ["BEAM_TRAIN_TIMEOUT_SECONDS"] = train_timeout_seconds
 
     module_name = f"run_beam_test_{gpu}_{pool}_{id(captured)}"
     spec = importlib.util.spec_from_file_location(module_name, RUN_BEAM_PATH)
@@ -158,7 +162,25 @@ class BeamGpuConfigTests(unittest.TestCase):
                 module, _ = load_run_beam(gpu, pool)
                 self.assertEqual(module.image.build_gpu, gpu)
                 self.assertNotEqual(module.image.context_dir, ".")
-        self.assertNotIn(str(PROJECT_ROOT), module.image.context_dir)
+                self.assertNotIn(str(PROJECT_ROOT), module.image.context_dir)
+
+    def test_training_timeout_is_configurable(self):
+        for raw_value, expected in (("14400", 14400), ("7200", 7200), ("-1", -1)):
+            with self.subTest(raw_value=raw_value):
+                module, captured = load_run_beam(
+                    "RTX4090", train_timeout_seconds=raw_value
+                )
+                self.assertEqual(module.beam_train_timeout_seconds, expected)
+                self.assertEqual(captured["timeout"], expected)
+
+    def test_invalid_training_timeout_is_rejected(self):
+        for raw_value in ("0", "-2", "two-hours"):
+            with self.subTest(raw_value=raw_value):
+                module, _ = load_run_beam("RTX4090")
+                with self.assertRaises(ValueError):
+                    module.resolve_train_timeout_seconds(
+                        {"BEAM_TRAIN_TIMEOUT_SECONDS": raw_value}
+                    )
 
     def test_keep_warm_timeout_is_configurable(self):
         for raw_value, expected in (("3600", 3600), ("-1", -1), ("0", 0)):
@@ -342,7 +364,7 @@ class BeamDockerfileTests(unittest.TestCase):
     def test_packaging_keeps_ui_source_but_excludes_local_build_artifacts(self):
         beamignore = BEAMIGNORE_PATH.read_text()
         dockerignore = DOCKERIGNORE_PATH.read_text()
-        self.assertNotIn("\nui/\n", beamignore)
+        self.assertNotIn("ui/", beamignore.splitlines())
         self.assertIn("ui/node_modules/", beamignore)
         self.assertIn("ui/.next/", beamignore)
         self.assertIn("ui/node_modules/", dockerignore)

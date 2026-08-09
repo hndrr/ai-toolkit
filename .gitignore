@@ -191,6 +191,10 @@ aitk_db.db-shm
 /data
 triton-3.2.0-cp310-cp310-win_amd64.whl
 input/*
+!input/images/
+!input/images/.gitkeep
+!input/control/
+!input/control/.gitkeep
 FLUX.1-dev/*
 .claude
 original_repo
