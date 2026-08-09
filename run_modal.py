@@ -68,14 +68,20 @@ image = (
         "huggingface_hub", 
         "peft"
     )
+    .add_local_dir(
+        ".",
+        "/root/ai-toolkit",
+        ignore=["models/**", "output/**", ".venv/**", ".env*"],
+    )
 )
 
 # mount for the entire ai-toolkit directory
 # example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
-code_mount = modal.Mount.from_local_dir("/Users/username/ai-toolkit", remote_path="/root/ai-toolkit")
+# code_mount = modal.Mount.from_local_dir(".", remote_path="/root/ai-toolkit")
 
 # create the Modal app with the necessary mounts and volumes
-app = modal.App(name="flux-lora-training", image=image, mounts=[code_mount], volumes={MOUNT_DIR: model_volume})
+# app = modal.App(name="flux-lora-training", image=image, mounts=[code_mount], volumes={MOUNT_DIR: model_volume})
+app = modal.App(name="flux-lora-training", image=image, volumes={MOUNT_DIR: model_volume})
 
 # Check if we have DEBUG_TOOLKIT in env
 if os.environ.get("DEBUG_TOOLKIT", "0") == "1":
@@ -171,4 +177,4 @@ if __name__ == "__main__":
     # convert list of config files to a comma-separated string for Modal compatibility
     config_file_list_str = ",".join(args.config_file_list)
 
-    main.call(config_file_list_str=config_file_list_str, recover=args.recover, name=args.name)
+    main.remote(config_file_list_str=config_file_list_str, recover=args.recover, name=args.name)

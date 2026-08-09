@@ -2,41 +2,35 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// if route starts with these, approve
-const publicRoutes = ['/api/img/', '/api/files/'];
+// Browser media elements cannot attach an Authorization header. The auth
+// endpoint sets this HttpOnly session cookie after validating the password.
+export const AUTH_COOKIE_NAME = 'AI_TOOLKIT_SESSION';
+
+function requestToken(request: NextRequest): string | null {
+  const authorization = request.headers.get('Authorization');
+  if (authorization !== null) {
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    return match ? match[1] : '';
+  }
+  return request.cookies.get(AUTH_COOKIE_NAME)?.value ?? null;
+}
 
 export function middleware(request: NextRequest) {
-  // check env var for AI_TOOLKIT_AUTH, if not set, approve all requests
-  // if it is set make sure bearer token matches
+  // If AI_TOOLKIT_AUTH is not configured, preserve the local unauthenticated
+  // development behavior. Beam/Modal deployments provide it through a secret.
   const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
   if (!tokenToUse) {
     return NextResponse.next();
   }
 
-  // Get the token from the headers
-  const token = request.headers.get('Authorization')?.split(' ')[1];
-
-  // allow public routes to pass through
-  if (publicRoutes.some(route => request.nextUrl.pathname.startsWith(route))) {
-    return NextResponse.next();
+  const token = requestToken(request);
+  if (token !== tokenToUse) {
+    const response = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // An invalid Authorization header must not fall back to an old session.
+    response.cookies.delete(AUTH_COOKIE_NAME);
+    return response;
   }
 
-  // Check if the route should be protected
-  // This will apply to all API routes that start with /api/
-  if (request.nextUrl.pathname.startsWith('/api/')) {
-    if (!token || token !== tokenToUse) {
-      // Return a JSON response with 401 Unauthorized
-      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // For authorized users, continue
-    return NextResponse.next();
-  }
-
-  // For non-API routes, just continue
   return NextResponse.next();
 }
 

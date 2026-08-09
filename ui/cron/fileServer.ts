@@ -46,6 +46,38 @@ function argValue(name: string, fallback: number): number {
 
 const PUBLIC_PORT = argValue('--port', isDev ? 3000 : 8675);
 const UPSTREAM_HOST = '127.0.0.1';
+const AUTH_COOKIE_NAME = 'AI_TOOLKIT_SESSION';
+
+function cookieValue(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  const entry = cookieHeader.split(';').find(part => part.trim().startsWith(`${name}=`));
+  if (!entry) return null;
+  const value = entry.trim().slice(name.length + 1);
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function requestToken(req: http.IncomingMessage): string | null {
+  const authorization = req.headers.authorization;
+  if (authorization !== undefined) {
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    return match ? match[1] : '';
+  }
+  return cookieValue(req.headers.cookie, AUTH_COOKIE_NAME);
+}
+
+function requiresAuth(req: http.IncomingMessage): boolean {
+  const expected = process.env.AI_TOOLKIT_AUTH;
+  return Boolean(expected) && requestToken(req) !== expected;
+}
+
+function rejectUnauthorized(res: http.ServerResponse): void {
+  res.writeHead(401, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Unauthorized' }));
+}
 
 const numWorkers = (() => {
   const env = parseInt(process.env.AI_TOOLKIT_FILE_SERVER_WORKERS || '', 10);
@@ -68,14 +100,16 @@ async function getRoots(): Promise<Roots> {
   const rows = await prisma.settings.findMany({
     where: { key: { in: ['DATASETS_FOLDER', 'TRAINING_FOLDER', 'DATA_ROOT'] } },
   });
-  const fromRow = (key: string, fallback: string) => {
+  const fromRow = (key: string, envName: string, fallback: string) => {
+    const envPath = process.env[envName]?.trim();
+    if (envPath) return envPath;
     const row = rows.find(r => r.key === key);
     return row?.value && row.value !== '' ? row.value : fallback;
   };
   const roots: Roots = {
-    datasets: fromRow('DATASETS_FOLDER', defaultDatasetsFolder),
-    training: fromRow('TRAINING_FOLDER', defaultTrainFolder),
-    data: fromRow('DATA_ROOT', defaultDataRoot),
+    datasets: fromRow('DATASETS_FOLDER', 'DATASETS_FOLDER', defaultDatasetsFolder),
+    training: fromRow('TRAINING_FOLDER', 'TRAINING_FOLDER', defaultTrainFolder),
+    data: fromRow('DATA_ROOT', 'DATA_ROOT', defaultDataRoot),
   };
   rootsCache = { roots, ts: Date.now() };
   return roots;
@@ -108,6 +142,13 @@ const contentTypeMap: { [key: string]: string } = {
 
 async function serveFile(req: http.IncomingMessage, res: http.ServerResponse, prefix: string): Promise<void> {
   try {
+    // This server handles media downloads before the Next.js middleware. Keep
+    // those routes behind the same password instead of exposing dataset and
+    // output files to unauthenticated callers.
+    if (requiresAuth(req)) {
+      rejectUnauthorized(res);
+      return;
+    }
     // /api/img/ serves media inline with ETag revalidation; /api/files/ is a
     // forced download. Both mirror their Next.js route's exact semantics.
     const isImg = prefix === '/api/img/';

@@ -14,6 +14,7 @@ services:
       - ./config:/app/ai-toolkit/config
     environment:
       - AI_TOOLKIT_AUTH=${AI_TOOLKIT_AUTH:-password}
+      - DATABASE_URL=${DATABASE_URL:-file:/app/ai-toolkit/aitk_db.db}
       - NODE_ENV=production
       - TZ=UTC
     deploy:

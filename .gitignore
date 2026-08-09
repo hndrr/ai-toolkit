@@ -172,7 +172,7 @@ cython_debug/
 /.tmp
 /venv.bkp
 /venv.*
-/config/*
+# /config/*
 !/config/examples
 !/config/_PUT_YOUR_CONFIGS_HERE).txt
 /output/*
@@ -189,5 +189,12 @@ aitk_db.db-wal
 aitk_db.db-shm
 /notes.md
 /data
+triton-3.2.0-cp310-cp310-win_amd64.whl
+input/*
+!input/images/
+!input/images/.gitkeep
+!input/control/
+!input/control/.gitkeep
+FLUX.1-dev/*
 .claude
 original_repo
