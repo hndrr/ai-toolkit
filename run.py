@@ -158,12 +158,11 @@ def main():
                     job.process[0].on_error(e)
                 except Exception as e2:
                     print_acc(f"Error running on_error: {e2}")
-            if not args.recover:
-                print_acc("")
-                print_acc("========================================")
-                print_acc("Job stopped")
-                print_acc("========================================")
-                sys.exit(0)
+            print_acc("")
+            print_acc("========================================")
+            print_acc("Job stopped")
+            print_acc("========================================")
+            sys.exit(0)
         finally:
             if os.environ.get("BEAM_GPU", "").strip() and accelerator.is_main_process:
                 elapsed_seconds = time.monotonic() - training_started_at

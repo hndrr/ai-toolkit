@@ -29,11 +29,16 @@ model_volume = modal.Volume.from_name("flux-lora-models", create_if_missing=True
 MOUNT_DIR = "/app/ai-toolkit/modal_output"  # modal_output, due to "cannot mount volume on non-empty path" requirement
 
 # define modal app
-image = modal.Image.from_dockerfile("docker/Dockerfile").add_local_dir("config", "/app/ai-toolkit/config").add_local_dir("input/images", '/app/ai-toolkit/input/images')
+image = (
+    modal.Image.from_dockerfile("docker/Dockerfile")
+    .add_local_dir("config", "/app/ai-toolkit/config")
+    .add_local_dir("input/images", "/app/ai-toolkit/input/images")
+    .add_local_dir("input/control", "/app/ai-toolkit/input/control")
+)
 
 # mount for the entire ai-toolkit directory
-# example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
-# code_mount = modal.Mount.from_local_dir("D:/ai-toolkit", remote_path="/root/ai-toolkit")
+# example: "/Users/username/ai-toolkit" is the local directory, "/app/ai-toolkit" is the remote directory
+# code_mount = modal.Mount.from_local_dir(".", remote_path="/app/ai-toolkit")
 
 # create the Modal app with the necessary mounts and volumes
 # app = modal.App(name="flux-lora-training", image=image, mounts=[code_mount], volumes={MOUNT_DIR: model_volume})
@@ -119,17 +124,26 @@ def webui():
     import time
     import os
     
+    hf_token = os.environ.get("HF_TOKEN")
+    ai_toolkit_auth = os.environ.get("AI_TOOLKIT_AUTH")
+    if not ai_toolkit_auth:
+        raise RuntimeError(
+            "AI_TOOLKIT_AUTH is required in the huggingface-secret Modal Secret "
+            "before starting the WebUI"
+        )
+
     # Hugging Faceにログイン
     try:
         from huggingface_hub import login
-        hf_token = os.environ.get("HF_TOKEN")
         if hf_token:
             login(token=hf_token)
             print("✅ Successfully logged in to Hugging Face")
         else:
             print("⚠️ No HF_TOKEN found")
-    except Exception as e:
-        print(f"⚠️ Failed to login to Hugging Face: {e}")
+    except Exception as exc:
+        # Do not include exception text here: some client errors echo request
+        # metadata, and the HF token must never reach Modal logs.
+        print(f"⚠️ Failed to login to Hugging Face ({type(exc).__name__})")
     
     # AI-toolkit UIディレクトリに移動
     os.chdir("/app/ai-toolkit/ui")
@@ -140,11 +154,13 @@ def webui():
     # modal.forwardでポート8675を公開
     with modal.forward(8675) as tunnel:
         print(f"🌐 AI Toolkit WebUI is accessible at: {tunnel.url}")
-        print(f"🔧 Starting UI server...")
+        print("🔧 Starting UI server...")
         print(f"💾 Training outputs will be saved to: {MOUNT_DIR}")
         
         # npm run startでWebUIを起動
         env_vars = os.environ.copy()
+        env_vars["AI_TOOLKIT_AUTH"] = ai_toolkit_auth
+        env_vars.setdefault("DATABASE_URL", f"file:{MOUNT_DIR}/aitk_db.db")
         if hf_token:
             env_vars.update({
                 "HF_TOKEN": hf_token,
@@ -154,8 +170,6 @@ def webui():
         
         process = subprocess.Popen(
             ["npm", "run", "start"],
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE,
             cwd="/app/ai-toolkit/ui",
             env=env_vars  # 環境変数を明示的に渡す
         )
@@ -169,32 +183,21 @@ def webui():
         # 2時間維持（トレーニング時間を考慮）
         try:
             while process.poll() is None:
-                # プロセスのログを定期的に出力
-                try:
-                    stdout_line = process.stdout.readline()
-                    if stdout_line:
-                        print(f"[WebUI] {stdout_line.decode().strip()}")
-                    
-                    stderr_line = process.stderr.readline()
-                    if stderr_line:
-                        print(f"[WebUI ERROR] {stderr_line.decode().strip()}")
-                except:
-                    pass
-                
                 time.sleep(10)
                 # 定期的にボリュームをコミット
                 model_volume.commit()
         except KeyboardInterrupt:
             print("🛑 Shutting down WebUI...")
             process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
         finally:
-            # プロセス終了時の最終ログ
-            if process.poll() is not None:
-                stdout, stderr = process.communicate()
-                if stdout:
-                    print(f"[WebUI Final STDOUT] {stdout.decode()}")
-                if stderr:
-                    print(f"[WebUI Final STDERR] {stderr.decode()}")
+            # stdout/stderr inherit Modal's logs; wait here to reap the child.
+            if process.poll() is None:
+                process.wait()
             
             # 最終コミット
             model_volume.commit()
