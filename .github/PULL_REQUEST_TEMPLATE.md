@@ -1,3 +1,6 @@
+> [!WARNING]
+> This checkout is the `hndrr/ai-toolkit` fork. Before submitting, confirm that the PR base repository is `hndrr/ai-toolkit` and not `ostris/ai-toolkit`.
+
 > [!CAUTION]
 > **NO AUTOMATED AI AGENT PULL REQUESTS**
 >

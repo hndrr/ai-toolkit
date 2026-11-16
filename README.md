@@ -241,6 +241,9 @@ pip install --upgrade accelerate transformers diffusers huggingface_hub #Optiona
 #### Modal:
 - Run `pip install modal` to install the modal Python package.
 - Run `modal setup` to authenticate (if this doesn’t work, try `python -m modal setup`).
+- For `run_modal_docker.py --webui`, add both `HF_TOKEN` and a strong
+  `AI_TOOLKIT_AUTH` value to the `huggingface-secret` Modal Secret. The WebUI
+  refuses to start when the password is missing.
 
 #### Hugging Face:
 - Get a READ token from [here](https://huggingface.co/settings/tokens) and request access to Flux.1-dev model from [here](https://huggingface.co/black-forest-labs/FLUX.1-dev).
@@ -274,6 +277,106 @@ pip install --upgrade accelerate transformers diffusers huggingface_hub #Optiona
 ### Screenshot from Modal
 
 <img width="1728" alt="Modal Traning Screenshot" src="https://github.com/user-attachments/assets/7497eb38-0090-49d6-8ad9-9c8ea7b5388b">
+
+---
+
+## AI Toolkit GUI on Beam Cloud
+
+Beam runs the existing AI Toolkit Next.js UI, cron worker, and Python trainer together in a GPU-backed Pod. Open the URL printed by `beam deploy` in a browser and use the normal AI Toolkit GUI to upload datasets, create jobs, monitor logs, and download outputs. Beam supports browser-accessible GPU Pods for hosting GUIs and other web services ([Beam Pod documentation](https://docs.beam.cloud/v2/pod/web-service)).
+
+### 1. Install, authenticate, and create secrets
+
+Use `uv` for the local Beam SDK and CLI:
+
+```bash
+uv sync
+uv run beam configure default --token YOUR_BEAM_TOKEN
+```
+
+Create both secrets before deploying. `HF_TOKEN` must have access to any gated model used by the UI. `AI_TOOLKIT_AUTH` is the password required by the browser UI:
+
+```bash
+uv run beam secret create HF_TOKEN YOUR_HUGGING_FACE_TOKEN
+uv run beam secret create AI_TOOLKIT_AUTH A_LONG_RANDOM_UI_PASSWORD
+```
+
+### 2. Check inventory and deploy the GUI
+
+Check current capacity before every deployment. Prices and availability are dynamic:
+
+```bash
+uv run beam machine list
+```
+
+`BEAM_GPU` is mandatory. Serverless GUI deployment supports only `A10G`, `RTX4090`, and `RTX5090`:
+
+```bash
+BEAM_GPU=RTX4090 uv run beam deploy run_beam.py:ai_toolkit_gui
+```
+
+The default inactivity timeout is 1800 seconds. Override it explicitly when deploying:
+
+```bash
+BEAM_KEEP_WARM_SECONDS=3600 BEAM_GPU=RTX4090 \
+  uv run beam deploy run_beam.py:ai_toolkit_gui
+```
+
+The training Function timeout defaults to 7200 seconds for one or more
+sequential configs. Set `BEAM_TRAIN_TIMEOUT_SECONDS` when a batch needs more
+time (`-1` disables the Function timeout); this does not change the Pod
+inactivity timeout:
+
+```bash
+BEAM_TRAIN_TIMEOUT_SECONDS=14400 BEAM_GPU=RTX4090 \
+  uv run python run_beam.py config/job_one.yaml config/job_two.yaml
+```
+
+Use `BEAM_KEEP_WARM_SECONDS=-1` only when a long training run must survive a closed browser; it prevents scale-to-zero and requires an explicit container stop. Beam terminates idle Pods after 10 minutes by default and supports custom timeouts, including `-1` for no inactivity timeout ([Pod lifecycle](https://docs.beam.cloud/v2/pod/web-service)).
+
+The command prints the HTTPS URL. Open it in a browser and enter the `AI_TOOLKIT_AUTH` password. GPU selection is explicit: AI Toolkit does not rank GPUs or fall back to another type. The first deployment builds the CUDA 12.9 image and the Next.js UI on the selected GPU because NATTEN and Flash Attention compile CUDA extensions; this build consumes GPU time. Training configs, datasets, and outputs are runtime files and do not invalidate the image cache. Later deployments with the same selected GPU reuse Beam's cached image unless the Dockerfile, Python dependency manifests, or UI source/dependencies change.
+
+The UI and its data are backed by persistent Beam Volumes:
+
+- SQLite job state
+- uploaded datasets and auxiliary data
+- training outputs
+- model and Hugging Face caches
+
+The Beam-injected `HF_TOKEN` is used server-side and is not returned to the browser.
+
+### 3. On-demand GUI deployment
+
+Reserve a named pool with a TTL, deploy the GUI using the same GPU and pool, then stop the Pod and release the pool when finished:
+
+```bash
+uv run beam machine reserve --gpu H100 --ttl 3h --name ai-toolkit-h100
+BEAM_KEEP_WARM_SECONDS=-1 BEAM_GPU=H100 BEAM_POOL=ai-toolkit-h100 \
+  uv run beam deploy run_beam.py:ai_toolkit_gui
+
+uv run beam container list
+uv run beam container stop CONTAINER_ID
+uv run beam machine release --pool ai-toolkit-h100
+```
+
+The supported on-demand GPU values are `RTX4090`, `RTX5090`, `RTXPro6000`, `A6000`, `L40S`, `A100-80`, `H100`, `H200`, and `B200`. On-demand billing continues while the reservation exists. Set `BEAM_KEEP_WARM_SECONDS=-1` for a long run that must survive browser inactivity; otherwise use a finite timeout to control idle cost. Stop the container and release the pool explicitly; TTL is a safety limit, not a substitute for cleanup. Current prices are shown by `beam machine list` and the [Beam pricing page](https://www.beam.cloud/pricing).
+
+The selected GPU, actual CUDA device, PyTorch CUDA version, and elapsed training time are written to each GUI-launched job log.
+
+### 4. Optional CUI batch mode
+
+The original one-off Function remains available for batch jobs. It uses the same explicit GPU and Pool rules but does not start the browser UI:
+
+```bash
+BEAM_GPU=RTX4090 uv run python run_beam.py config/my_beam_job.yaml
+BEAM_GPU=RTX5090 uv run python run_beam.py config/job_one.yaml config/job_two.yaml --recover
+```
+
+Batch outputs are written to the `ai-toolkit-output` volume and model downloads are cached in `ai-toolkit-cache`:
+
+```bash
+uv run beam ls ai-toolkit-output
+uv run beam cp beam://ai-toolkit-output/my_first_flux_lora_v1 .
+```
 
 ---
 
